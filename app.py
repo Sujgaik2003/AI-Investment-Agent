@@ -7,7 +7,8 @@ import numpy as np
 
 from data_loader import load_stock_data, add_technical_indicators
 from prediction_model import train_and_predict_rf
-from sentiment_analyzer import analyze_sentiment # NEW Import for sentiment analysis
+from sentiment_analyzer import analyze_sentiment
+from portfolio_optimizer import load_portfolio_data, optimize_portfolio # NEW Import for portfolio optimization
 
 st.set_page_config(layout="wide", page_title="AI Investment Agent POC")
 
@@ -67,10 +68,6 @@ def generate_mock_prediction(last_date: datetime, last_price: float, days_ahead:
     }).set_index('Date')
     return mock_df
 
-# --- Dynamic Mock Sentiment Generator (OLD - to be replaced or adapted) ---
-# This function is now superseded by the actual NLP sentiment analysis.
-# We will remove the definition here and use the analyze_sentiment from the new module.
-# The code below will directly use analyze_sentiment() in the main logic.
 
 # --- Main app logic ---
 if st.sidebar.button("Load Data"):
@@ -184,7 +181,7 @@ if st.sidebar.button("Load Data"):
 
         st.success("Data loaded and charts displayed successfully!")
 
-        # --- NEW FEATURE: Actual NLP Market Sentiment Display ---
+        # --- Market Sentiment Analysis (Powered by NLP) ---
         st.markdown("---")
         st.subheader("Market Sentiment Analysis (Powered by NLP)")
         
@@ -205,11 +202,6 @@ if st.sidebar.button("Load Data"):
                 st.markdown(f"**Sentiment:** <span style='color:{sentiment_result['color']};'>**{sentiment_result['label']}**</span> (Score: {sentiment_result['score']:.2f})", unsafe_allow_html=True)
                 st.markdown("---")
         
-        # You could also try to derive an 'overall' sentiment based on these.
-        # For a simple overall sentiment, let's just pick one of the sample texts, or average scores.
-        # For this POC, let's take a simple average of sentiment scores to determine an overall sentiment.
-        # This is a simplification; a real system would aggregate from many sources.
-
         overall_scores = [analyze_sentiment(text)['score'] for text in sample_news_texts]
         average_score = np.mean(overall_scores)
 
@@ -237,7 +229,6 @@ if st.sidebar.button("Load Data"):
         In a full AI system, this would analyze real-time financial news feeds, social media data,
         and corporate reports specific to the selected ticker.*
         """)
-        # --- END NEW FEATURE ---
 
         # --- Investment Plan & Allocation Advice (Placeholder) ---
         st.markdown("---")
@@ -249,15 +240,61 @@ if st.sidebar.button("Load Data"):
             value='Medium'
         )
 
+        # --- NEW FEATURE: AI-Driven Portfolio Optimization ---
+        st.markdown("---")
+        st.subheader("AI-Driven Portfolio Optimization (Max Sharpe Ratio)")
+
+        # Define a fixed set of diversified tickers for portfolio optimization POC
+        portfolio_tickers = ['SPY', 'BND', 'GLD', 'QQQ', 'VOO'] # S&P 500, Bonds, Gold, Nasdaq 100, S&P 500
+        
+        # Determine appropriate date range for portfolio data. Use a longer range than 1 year for better optimization
+        portfolio_end_date = datetime.now()
+        portfolio_start_date = portfolio_end_date - timedelta(days=5 * 365) # 5 years of data
+
+        @st.cache_data(ttl=3600) # Cache portfolio data as well
+        def get_and_optimize_portfolio(tickers, start, end):
+            df_prices = load_portfolio_data(tickers, start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
+            if not df_prices.empty:
+                results = optimize_portfolio(df_prices)
+                return results
+            return {}
+
+        optimization_results = get_and_optimize_portfolio(portfolio_tickers, portfolio_start_date, portfolio_end_date)
+
+        if optimization_results:
+            st.success("Portfolio Optimized for Maximum Sharpe Ratio!")
+            st.write("---")
+            st.markdown(f"**Expected Annual Return:** `{optimization_results['expected_annual_return']:.2%}`")
+            st.markdown(f"**Annual Volatility:** `{optimization_results['annual_volatility']:.2%}`")
+            st.markdown(f"**Sharpe Ratio:** `{optimization_results['sharpe_ratio']:.2f}`")
+            st.write("---")
+            st.write("### Recommended Asset Allocation:")
+            
+            # Convert weights to DataFrame for better display
+            weights_df = pd.DataFrame(list(optimization_results['weights'].items()), columns=['Asset', 'Weight'])
+            weights_df['Weight'] = weights_df['Weight'].apply(lambda x: f"{x:.2%}") # Format as percentage
+            st.dataframe(weights_df, use_container_width=True)
+
+            st.write("""
+            *Note: This portfolio optimization is based on historical data for a fixed set of assets and aims to maximize the Sharpe Ratio.
+            In a full AI system, this would be highly customized based on your risk profile, financial goals,
+            and real-time market predictions, potentially using more advanced optimization techniques (e.g., Reinforcement Learning, Goal-Based Investing).*
+            """)
+        else:
+            st.warning("Could not perform portfolio optimization. Check data availability or asset list.")
+
+        # Re-add the previous risk tolerance advice, as it's separate from optimization
         if mock_risk_tolerance == 'Low':
-            st.success("For a **Low Risk** profile, consider a conservative portfolio:")
+            st.markdown("---") # Separator for clarity
+            st.info("Your **Low Risk** profile suggests a more conservative allocation. Consider the optimized portfolio above or a traditional split like:")
             st.markdown("""
             * **60% Bonds/Fixed Income:** Focus on stable, income-generating assets.
             * **30% Diversified ETFs:** Broad market exposure, less volatility.
             * **10% Cash/Money Market:** For liquidity and stability.
             """)
         elif mock_risk_tolerance == 'Medium':
-            st.success("For a **Medium Risk** profile, a balanced approach is often suitable:")
+            st.markdown("---")
+            st.info("Your **Medium Risk** profile balances growth and stability. Consider the optimized portfolio or a traditional split like:")
             st.markdown("""
             * **40% Large-Cap Stocks:** Established companies with stable growth.
             * **30% Bonds/Fixed Income:** For diversification and risk reduction.
@@ -265,21 +302,15 @@ if st.sidebar.button("Load Data"):
             * **10% Real Estate/Alternatives:** For further diversification.
             """)
         else: # High Risk
-            st.success("For a **High Risk** profile, focus on growth opportunities:")
+            st.markdown("---")
+            st.info("Your **High Risk** profile seeks growth. Consider the optimized portfolio or a traditional split like:")
             st.markdown("""
             * **60% Growth Stocks (Tech, Biotech):** High growth potential, higher volatility.
             * **20% Emerging Markets ETFs:** Exposure to high-growth economies.
             * **10% Cryptocurrencies/Venture Capital:** Speculative, high-reward potential.
             * **10% Cash/Short-Term Bonds:** For tactical opportunities and some stability.
             """)
-
-        st.write("""
-        *Note: This advice is a **placeholder** based on a simple mock risk tolerance.
-        In a full AI system, this would be generated by sophisticated portfolio
-        optimization models considering your detailed financial goals,
-        risk capacity, predicted market movements, and personalized
-        behavioral insights.*
-        """)
+        # --- END NEW FEATURE ---
 
 
     else:
@@ -297,6 +328,7 @@ with st.expander("About this AI Investment Agent (POC) & Disclaimer"):
     * **Data Caching:** Leverages Streamlit's caching mechanisms for improved performance.
     * **AI Price Prediction (Basic):** Integrates a basic Random Forest Regressor to forecast future stock prices.
     * **Actual Market Sentiment Analysis (Basic NLP):** Integrates a pre-trained NLP model to analyze sentiment from sample news snippets.
+    * **AI-Driven Portfolio Optimization (Basic):** Calculates optimal asset weights for a sample portfolio using Modern Portfolio Theory.
     * **Mock Investment Advice:** Offers sample portfolio allocation advice based on a selected risk tolerance, demonstrating future personalization.
 
     **Technologies Used:**
@@ -309,6 +341,7 @@ with st.expander("About this AI Investment Agent (POC) & Disclaimer"):
     * **scikit-learn:** For machine learning model implementation.
     * **NumPy:** For numerical operations.
     * **Hugging Face Transformers / PyTorch:** For pre-trained NLP sentiment analysis.
+    * **PyPortfolioOpt / cvxpy:** For portfolio optimization.
 
     ---
 
