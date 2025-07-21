@@ -1,0 +1,8 @@
+pandas
+yfinance
+plotly
+streamlit
+ta
+scikit-learn
+transformers # Add this line
+torch        # Add this line
