@@ -26,7 +26,7 @@ def load_stock_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame
         return data
     except Exception as e:
         print(f"Error loading data for {ticker}: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame() # Return empty DataFrame on error
 
 def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -41,14 +41,12 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # --- FIX STARTS HERE ---
-    # Ensure 'Close' column is a 1-dimensional Series of float type
-    # This prevents the ValueError from ta library
+    # Ensure 'Close', 'High', 'Low', 'Volume' columns are 1-dimensional Series of float type
+    # This prevents TypeErrors from the ta library
     close_prices = df['Close'].astype(float).squeeze()
     high_prices = df['High'].astype(float).squeeze()
     low_prices = df['Low'].astype(float).squeeze()
     volume_data = df['Volume'].astype(float).squeeze()
-    # --- FIX ENDS HERE ---
 
     # Simple Moving Average (SMA)
     df['SMA_20'] = ta.trend.sma_indicator(close_prices, window=20)
@@ -65,9 +63,6 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df['MACD'] = ta.trend.macd(close_prices)
     df['MACD_Signal'] = ta.trend.macd_signal(close_prices)
     df['MACD_Hist'] = ta.trend.macd_diff(close_prices)
-
-    # Adding Volume directly for a potential future Volume chart
-    df['Volume_Plot'] = volume_data # Keep a separate column if needed for plotting
 
     return df
 

@@ -76,12 +76,10 @@ def train_and_predict_rf(df: pd.DataFrame, days_ahead: int = 5) -> tuple[pd.Seri
     future_predictions = []
 
     # Convert to a dictionary for easier in-place modification within the loop
-    # and then back to DataFrame for model.predict
     current_features_dict = last_known_features_for_prediction.to_dict()
 
     for _ in range(days_ahead):
         # Convert the dictionary of features back to a DataFrame row for prediction
-        # The model expects a 2D array (1 sample, N features)
         features_df_for_pred = pd.DataFrame([current_features_dict])
 
         # Predict the next day's close price
@@ -89,24 +87,14 @@ def train_and_predict_rf(df: pd.DataFrame, days_ahead: int = 5) -> tuple[pd.Seri
         future_predictions.append(next_day_pred)
 
         # --- Update features for the *next* prediction step ---
-        # Crucial part: The newly predicted 'Close' becomes 'Close_lag1' for the subsequent prediction.
+        # The newly predicted 'Close' becomes 'Close_lag1' for the subsequent prediction.
         if 'Close_lag1' in current_features_dict:
             current_features_dict['Close_lag1'] = next_day_pred
 
-        # For other lagged features (e.g., Open_lag1, High_lag1, Low_lag1, Volume_lag1):
-        # This is a simplification for a POC. In a real system, you would need
-        # to either predict these as well, or have other assumptions/data for them.
-        # For a RandomForest model, we generally assume the other features (non-close lags and indicators)
-        # remain constant or follow some pattern implicitly learned from the historical data for these
-        # short-term future predictions. For more accurate multi-step prediction, an autoregressive model
-        # or a sequence-to-sequence model (like LSTM) that predicts all features might be needed.
-        # Here, we keep their values from `last_known_features_for_prediction`.
+        # For other lagged features (e.g., Open_lag1, High_lag1, Low_lag1, Volume_lag1) and indicators:
+        # We simplify by keeping their values constant from the last known historical day for this POC.
+        # In a real system, you'd need more complex methods to propagate or predict these auxiliary features.
 
-        # For the indicators (SMA, EMA, RSI, MACD):
-        # These are also based on windows of prices/volume. Accurately propagating them
-        # into the future requires knowing future OHLCV. For this POC, we'll
-        # keep their values from `last_known_features_for_prediction` in the `current_features_dict`.
-        # The model will use the last known indicator values, combined with the propagating `Close_lag1`.
 
     # Generate future dates (business days)
     last_historical_date = df.index[-1]
@@ -123,6 +111,7 @@ def train_and_predict_rf(df: pd.DataFrame, days_ahead: int = 5) -> tuple[pd.Seri
     if len(predicted_series) > len(future_dates):
         predicted_series = predicted_series.iloc[:len(future_dates)]
     predicted_series.index.name = 'Date' # Set index name for consistency
+
 
     return predicted_series, model
 

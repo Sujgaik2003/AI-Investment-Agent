@@ -5,14 +5,15 @@ from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 
+# Import our custom modules
 from data_loader import load_stock_data, add_technical_indicators
 from prediction_model import train_and_predict_rf
-from sentiment_analyzer import analyze_sentiment
-from portfolio_optimizer import load_portfolio_data, optimize_portfolio # NEW Import for portfolio optimization
+from sentiment_analyzer import analyze_sentiment, fetch_financial_news # NEW: Import fetch_financial_news
+from portfolio_optimizer import load_portfolio_data, optimize_portfolio
 
 st.set_page_config(layout="wide", page_title="AI Investment Agent POC")
 
-st.title("📈 AI Investment Agent: Stock Price & Volume Visualizer (POC)")
+st.title("📈 AI Investment Agent: Stock Price & Portfolio Analyzer (POC)")
 st.markdown("---")
 
 # --- Sidebar for user input ---
@@ -42,6 +43,10 @@ show_volume = st.sidebar.checkbox("Show Volume", True)
 st.sidebar.markdown("---")
 show_ai_prediction = st.sidebar.checkbox("Show AI Price Prediction", True)
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("API Keys (for live features)")
+news_api_key = st.sidebar.text_input("NewsAPI.org API Key", type="password") # NEW: API Key input
+
 # --- Caching Functions ---
 @st.cache_data(ttl=3600) # Cache data for 1 hour (3600 seconds)
 def get_and_process_stock_data(ticker, start_date, end_date):
@@ -52,6 +57,64 @@ def get_and_process_stock_data(ticker, start_date, end_date):
     if not data.empty:
         data = add_technical_indicators(data)
     return data
+
+# --- Caching News Fetching ---
+@st.cache_data(ttl=600) # Cache news for 10 minutes (600 seconds)
+def get_and_analyze_news_sentiment(ticker, api_key):
+    """
+    Fetches news and analyzes sentiment, caching the results.
+    """
+    if not api_key:
+        return {}, [], "NewsAPI.org API Key is required for live sentiment analysis."
+    
+    articles = fetch_financial_news(ticker, api_key, page_size=20) # Fetch more articles
+    
+    if not articles:
+        return {}, [], "Could not fetch news. Check API key, internet, or ticker relevance."
+
+    sentiment_results = []
+    for article in articles:
+        # Analyze sentiment of the description or title (description is usually richer)
+        sentiment = analyze_sentiment(article['description'] if article['description'] else article['title'])
+        sentiment_results.append({
+            'title': article['title'],
+            'description': article['description'],
+            'url': article['url'],
+            'label': sentiment['label'],
+            'color': sentiment['color'],
+            'score': sentiment['score']
+        })
+
+    # Aggregate overall sentiment
+    overall_scores = [res['score'] for res in sentiment_results if res['label'] != 'N/A' and res['label'] != 'Error']
+    
+    if not overall_scores:
+        return {}, [], "No valid sentiment scores could be generated from fetched news."
+
+    average_score = np.mean(overall_scores)
+
+    if average_score > 0.7:
+        overall_sentiment_label = "Strongly Positive"
+        overall_sentiment_color = "darkgreen"
+    elif average_score > 0.55:
+        overall_sentiment_label = "Positive"
+        overall_sentiment_color = "green"
+    elif average_score < 0.3:
+        overall_sentiment_label = "Strongly Negative"
+        overall_sentiment_color = "darkred"
+    elif average_score < 0.45:
+        overall_sentiment_label = "Negative"
+        overall_sentiment_color = "red"
+    else:
+        overall_sentiment_label = "Neutral/Mixed"
+        overall_sentiment_color = "blue"
+
+    overall_sentiment_info = {
+        'label': overall_sentiment_label,
+        'color': overall_sentiment_color,
+        'average_score': average_score
+    }
+    return overall_sentiment_info, sentiment_results, "" # Return info, detailed results, and no error message
 
 # --- Helper function for mock prediction ---
 def generate_mock_prediction(last_date: datetime, last_price: float, days_ahead: int = 30) -> pd.DataFrame:
@@ -140,7 +203,7 @@ if st.sidebar.button("Load Data"):
                               row=1, col=1)
                 st.info("AI Price Prediction generated using a Random Forest Regressor. This is a basic model for POC.")
             else:
-                st.warning("Could not generate AI Price Prediction. Check data sufficiency.")
+                st.warning("Could not generate AI Price Prediction. Check data sufficiency for the model (e.g., ensure enough historical data).")
 
 
         # --- Add MACD, RSI, Volume traces to their own subplots based on dynamic row count ---
@@ -181,54 +244,36 @@ if st.sidebar.button("Load Data"):
 
         st.success("Data loaded and charts displayed successfully!")
 
-        # --- Market Sentiment Analysis (Powered by NLP) ---
+        # --- NEW FEATURE: Actual NLP Market Sentiment Display ---
         st.markdown("---")
         st.subheader("Market Sentiment Analysis (Powered by NLP)")
         
-        # Sample texts for demonstration (in a real app, these would come from a news API)
-        sample_news_texts = [
-            f"{ticker_symbol} shares soared today after positive earnings report.",
-            f"Analysts are cautious about {ticker_symbol} outlook due to macro economic headwinds.",
-            f"The market reacted negatively to the latest inflation data, causing a dip in {ticker_symbol} stock.",
-            f"{ticker_symbol} announces innovative new product line, surprising competitors.",
-            f"Minor fluctuations in {ticker_symbol} stock, trading flat for the week."
-        ]
+        # Call the new caching function to fetch and analyze news sentiment
+        overall_sentiment_info, sentiment_results, error_message = get_and_analyze_news_sentiment(ticker_symbol, news_api_key)
 
-        # Use an expander to show individual sentiment scores for sample texts
-        with st.expander("Show Sample News Sentiment Details"):
-            for i, text in enumerate(sample_news_texts):
-                sentiment_result = analyze_sentiment(text)
-                st.markdown(f"**News Snippet {i+1}:** \"{text}\"")
-                st.markdown(f"**Sentiment:** <span style='color:{sentiment_result['color']};'>**{sentiment_result['label']}**</span> (Score: {sentiment_result['score']:.2f})", unsafe_allow_html=True)
-                st.markdown("---")
-        
-        overall_scores = [analyze_sentiment(text)['score'] for text in sample_news_texts]
-        average_score = np.mean(overall_scores)
+        if error_message:
+            st.error(error_message)
+        elif overall_sentiment_info:
+            st.markdown(f"**Overall Market Sentiment for {ticker_symbol}:** <span style='color:{overall_sentiment_info['color']}; font-size: 24px;'>**{overall_sentiment_info['label']}**</span>", unsafe_allow_html=True)
+            st.write(f"*(Based on analysis of {len(sentiment_results)} recent news articles - Average Score: {overall_sentiment_info['average_score']:.2f})*")
+            st.write("""
+            *Note: This sentiment is now powered by a **pre-trained NLP model** from Hugging Face Transformers,
+            analyzing real-time financial news from NewsAPI.org.*
+            """)
 
-        # Map average score to a general sentiment
-        if average_score > 0.7:
-            overall_sentiment_label = "Strongly Positive"
-            overall_sentiment_color = "darkgreen"
-        elif average_score > 0.55:
-            overall_sentiment_label = "Positive"
-            overall_sentiment_color = "green"
-        elif average_score < 0.3:
-            overall_sentiment_label = "Strongly Negative"
-            overall_sentiment_color = "darkred"
-        elif average_score < 0.45:
-            overall_sentiment_label = "Negative"
-            overall_sentiment_color = "red"
+            with st.expander("Show Recent News & Individual Sentiment Details"):
+                if sentiment_results:
+                    for article_info in sentiment_results:
+                        st.markdown(f"**Title:** [{article_info['title']}]({article_info['url']})")
+                        st.markdown(f"**Description:** {article_info['description']}")
+                        st.markdown(f"**Sentiment:** <span style='color:{article_info['color']};'>**{article_info['label']}**</span> (Score: {article_info['score']:.2f})", unsafe_allow_html=True)
+                        st.markdown("---")
+                else:
+                    st.write("No news articles fetched or processed for sentiment.")
         else:
-            overall_sentiment_label = "Neutral/Mixed"
-            overall_sentiment_color = "blue"
+            st.info("No sentiment analysis results available.")
 
-        st.markdown(f"**Overall Market Sentiment for {ticker_symbol}:** <span style='color:{overall_sentiment_color}; font-size: 24px;'>**{overall_sentiment_label}**</span>", unsafe_allow_html=True)
-        st.write(f"*(Based on analysis of sample news snippets - Average Score: {average_score:.2f})*")
-        st.write("""
-        *Note: This sentiment is now powered by a **pre-trained NLP model** from Hugging Face Transformers.
-        In a full AI system, this would analyze real-time financial news feeds, social media data,
-        and corporate reports specific to the selected ticker.*
-        """)
+        # --- END NEW FEATURE ---
 
         # --- Investment Plan & Allocation Advice (Placeholder) ---
         st.markdown("---")
@@ -240,7 +285,7 @@ if st.sidebar.button("Load Data"):
             value='Medium'
         )
 
-        # --- NEW FEATURE: AI-Driven Portfolio Optimization ---
+        # --- AI-Driven Portfolio Optimization ---
         st.markdown("---")
         st.subheader("AI-Driven Portfolio Optimization (Max Sharpe Ratio)")
 
@@ -281,7 +326,7 @@ if st.sidebar.button("Load Data"):
             and real-time market predictions, potentially using more advanced optimization techniques (e.g., Reinforcement Learning, Goal-Based Investing).*
             """)
         else:
-            st.warning("Could not perform portfolio optimization. Check data availability or asset list.")
+            st.warning("Could not perform portfolio optimization. Check data availability or asset list (e.g., for SPY, BND, GLD, QQQ, VOO).")
 
         # Re-add the previous risk tolerance advice, as it's separate from optimization
         if mock_risk_tolerance == 'Low':
@@ -310,7 +355,6 @@ if st.sidebar.button("Load Data"):
             * **10% Cryptocurrencies/Venture Capital:** Speculative, high-reward potential.
             * **10% Cash/Short-Term Bonds:** For tactical opportunities and some stability.
             """)
-        # --- END NEW FEATURE ---
 
 
     else:
@@ -327,7 +371,7 @@ with st.expander("About this AI Investment Agent (POC) & Disclaimer"):
     * **Technical Indicators:** Calculates and visualizes common technical indicators (SMA, EMA, RSI, MACD) using the `ta` library.
     * **Data Caching:** Leverages Streamlit's caching mechanisms for improved performance.
     * **AI Price Prediction (Basic):** Integrates a basic Random Forest Regressor to forecast future stock prices.
-    * **Actual Market Sentiment Analysis (Basic NLP):** Integrates a pre-trained NLP model to analyze sentiment from sample news snippets.
+    * **Actual Market Sentiment Analysis (Basic NLP):** Integrates a pre-trained NLP model to analyze sentiment from **real-time news headlines** (requires NewsAPI.org key).
     * **AI-Driven Portfolio Optimization (Basic):** Calculates optimal asset weights for a sample portfolio using Modern Portfolio Theory.
     * **Mock Investment Advice:** Offers sample portfolio allocation advice based on a selected risk tolerance, demonstrating future personalization.
 
@@ -341,6 +385,7 @@ with st.expander("About this AI Investment Agent (POC) & Disclaimer"):
     * **scikit-learn:** For machine learning model implementation.
     * **NumPy:** For numerical operations.
     * **Hugging Face Transformers / PyTorch:** For pre-trained NLP sentiment analysis.
+    * **Requests:** For making HTTP calls to APIs (e.g., NewsAPI.org).
     * **PyPortfolioOpt / cvxpy:** For portfolio optimization.
 
     ---
