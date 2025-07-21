@@ -9,3 +9,4 @@ torch        # Add this line
 PyPortfolioOpt # Add this line
 cvxpy  
 matplotlib        # Add this line
+requests
